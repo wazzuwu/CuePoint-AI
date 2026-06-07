@@ -1,18 +1,12 @@
-# Core transcript fetching
-youtube-transcript-api>=1.2.4
-
-# Embeddings + reranking
-sentence-transformers>=3.0.0
-
-# Vector store
 chromadb>=0.6.0
-
-# LangChain (for Chroma integration + future scalability)
-langchain-community>=0.3.0
-langchain-chroma>=0.2.0
-
-# LLM (Groq via OpenAI-compatible API)
+fastapi>=0.115.0
+langchain-core>=0.3.0
+langchain-groq>=0.2.0
+numpy>=1.26.0
 openai>=1.0.0
-
-# Utilities
+pydantic>=2.0.0
 python-dotenv>=1.0.0
+sentence-transformers>=3.0.0
+starlette>=0.41.0
+uvicorn>=0.32.0
+youtube-transcript-api>=1.2.4
