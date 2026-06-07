@@ -16,6 +16,12 @@ frontend/.next/
 # Data
 data/
 
+# Project files
+project Description.txt
+results.txt
+test_*.py
+test_*.txt
+
 # OS
 .DS_Store
 Thumbs.db
