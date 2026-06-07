@@ -1,0 +1,24 @@
+About Sportomic:
+Sportomic is a sports venue management platform working with turfs, academies, and sports complexes
+across India. This task tests one thing: can you use AI to extract precise, verifiable information from rich
+media — video and audio — and can you clearly explain how you did it.
+
+Podcast Q&A Bot
+Build a bot trained on this podcast. We ask it a question; it replies with an answer and opens the video at
+the exact timestamp where that topic is discussed.
+Elon Musk × Nikhil Kamath | People by WTF Ep. 16
+Example query: “What is first-principles thinking?” → bot answers + jumps to that moment in the video.
+What to Submit (for your chosen task)
+• The Answer — the number / timestamp, along with workflow, prompts, and steps.
+• Tools & Models — which AI tools/models you used.
+• Explainer video — screen recording with voiceover explaining the solution live
+• Accuracy Check — how you verified the answer is right.
+• Limitations — where AI struggled and what you'd improve.
+How We Judge
+We care less about the perfect answer and more about how you think with AI — your method, your
+verification, and your honesty about limits.
+Deliverables
+Item Format
+Solution Writeup Google Doc / PDF link
+Deployment/ Code / Notebook (if any) Add link to the write up
+Explainer video (screen recording with voiceover) Link (Drive/YouTube)
