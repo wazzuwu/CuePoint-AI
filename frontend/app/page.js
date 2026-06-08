@@ -55,6 +55,7 @@ export default function Home() {
       setMessages([]);
     } catch (e) {
       setError(e.message);
+      setVideoId('');
     } finally {
       setBusy(false);
     }
@@ -180,7 +181,7 @@ export default function Home() {
         </div>
 
         <div className="chat-messages">
-          {messages.length === 0 && !busy && <EmptyState />}
+          {messages.length === 0 && !busy && <EmptyState error={error} />}
           {messages.map((msg, i) => (
             <ChatMessage key={msg._id || i} message={msg} onJumpTo={jumpTo} />
           ))}
