@@ -18,6 +18,8 @@ import logging
 import os
 import re
 import tempfile
+
+import requests
 from abc import ABC, abstractmethod
 from typing import List, Optional
 
@@ -63,6 +65,47 @@ def _vtt_seconds(ts: str) -> float:
         return 0.0
     h, mi, s, ms = int(m[1]), int(m[2]), int(m[3]), int(m[4])
     return h * 3600 + mi * 60 + s + ms / 1000
+
+
+def _srt_seconds(ts: str) -> float:
+    """Convert an SRT timestamp (HH:MM:SS,mmm) to float seconds."""
+    m = re.match(r"(\d{2}):(\d{2}):(\d{2})[,.](\d{3})", ts)
+    if not m:
+        return 0.0
+    h, mi, s, ms = int(m[1]), int(m[2]), int(m[3]), int(m[4])
+    return h * 3600 + mi * 60 + s + ms / 1000
+
+
+def _parse_srt(text: str) -> list[dict]:
+    """Parse SRT caption text into list of {start, end, text} dicts."""
+    snippets = []
+    blocks = re.split(r"\n\n+", text.strip())
+
+    for block in blocks:
+        lines = block.strip().splitlines()
+        if len(lines) < 2:
+            continue
+
+        ts_line = None
+        text_start = 1
+        for i in range(min(3, len(lines))):
+            if " --> " in lines[i]:
+                ts_line = lines[i]
+                text_start = i + 1
+                break
+
+        if not ts_line:
+            continue
+
+        start_str, end_str = ts_line.split(" --> ", 1)
+        start = _srt_seconds(start_str)
+        end = _srt_seconds(end_str)
+
+        text = " ".join(l.strip() for l in lines[text_start:] if l.strip())
+        if text:
+            snippets.append({"start": start, "end": end, "text": text})
+
+    return snippets
 
 
 def _parse_vtt(text: str) -> list[dict]:
@@ -270,41 +313,180 @@ class YouTubeTranscriptProvider(TranscriptProvider):
         return infos
 
 
-# ── Composite: primary + fallback ──────────────────────────────────────
+# ── YouTube Data API (OAuth) ──────────────────────────────────────────
 
-class FailoverTranscriptProvider(TranscriptProvider):
-    """Tries yt-dlp first; falls back to youtube-transcript-api on failure."""
+class YouTubeDataApiTranscriptProvider(TranscriptProvider):
+    """
+    Fetches transcripts via the official YouTube Data API v3 using OAuth.
+
+    Requires these env vars on Render:
+      YOUTUBE_CLIENT_ID
+      YOUTUBE_CLIENT_SECRET
+      YOUTUBE_REFRESH_TOKEN
+
+    See ``scripts/get_youtube_refresh_token.py`` for one-time setup.
+    """
+
+    _TOKEN_URL = "https://oauth2.googleapis.com/token"
+    _API_BASE = "https://youtube.googleapis.com/v1"
+    _SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl"]
 
     def __init__(self) -> None:
-        self._primary = YtDlpTranscriptProvider()
-        self._fallback = YouTubeTranscriptProvider()
+        self._client_id = config.youtube_client_id or ""
+        self._client_secret = config.youtube_client_secret or ""
+        self._refresh_token = config.youtube_refresh_token or ""
+
+    def _access_token(self) -> str:
+        resp = requests.post(self._TOKEN_URL, data={
+            "client_id": self._client_id,
+            "client_secret": self._client_secret,
+            "refresh_token": self._refresh_token,
+            "grant_type": "refresh_token",
+        })
+        resp.raise_for_status()
+        return resp.json()["access_token"]
 
     def fetch(
         self,
         video_id: str,
         languages: Optional[List[str]] = None,
     ) -> Transcript:
-        try:
-            return self._primary.fetch(video_id, languages=languages)
-        except Exception as exc:
-            log.warning(
-                "yt-dlp failed for %s: %s — falling back to youtube-transcript-api",
-                video_id, exc,
+        if languages is None:
+            languages = config.transcript_languages
+
+        token = self._access_token()
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # List available caption tracks
+        resp = requests.get(
+            f"{self._API_BASE}/captions",
+            params={"videoId": video_id, "part": "snippet"},
+            headers=headers,
+        )
+        resp.raise_for_status()
+        items = resp.json().get("items", [])
+        if not items:
+            raise RuntimeError(f"No caption tracks found for video {video_id}")
+
+        # Pick best matching language
+        caption_id = None
+        chosen_lang = languages[0]
+        for lang in languages:
+            for item in items:
+                cl = item["snippet"]["language"]
+                if cl == lang:
+                    caption_id = item["id"]
+                    chosen_lang = lang
+                    break
+            if caption_id:
+                break
+        if not caption_id:
+            caption_id = items[0]["id"]
+            chosen_lang = items[0]["snippet"]["language"]
+
+        # Download caption content (SRT format)
+        resp = requests.get(
+            f"{self._API_BASE}/captions/{caption_id}",
+            params={"tfmt": "srt"},
+            headers=headers,
+        )
+        resp.raise_for_status()
+
+        snippets_raw = _parse_srt(resp.text)
+
+        snippets = [
+            TranscriptSnippet(
+                text=s["text"],
+                start=s["start"],
+                duration=s["end"] - s["start"],
             )
-            return self._fallback.fetch(video_id, languages=languages)
+            for s in snippets_raw
+        ]
+
+        return Transcript(
+            video_id=video_id,
+            language=chosen_lang,
+            language_code=chosen_lang,
+            snippets=snippets,
+        )
 
     def list_transcripts(self, video_id: str) -> List[TranscriptInfo]:
-        try:
-            return self._primary.list_transcripts(video_id)
-        except Exception:
-            return self._fallback.list_transcripts(video_id)
+        token = self._access_token()
+        resp = requests.get(
+            f"{self._API_BASE}/captions",
+            params={"videoId": video_id, "part": "snippet"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        resp.raise_for_status()
+
+        infos: List[TranscriptInfo] = []
+        for item in resp.json().get("items", []):
+            s = item["snippet"]
+            infos.append(
+                TranscriptInfo(
+                    video_id=video_id,
+                    language=s["language"],
+                    language_code=s["language"],
+                    is_generated=s.get("trackKind", "") == "ASR",
+                    is_translatable=False,
+                )
+            )
+        return infos
+
+
+# ── Composite: primary + fallbacks ──────────────────────────────────────
+
+class FailoverTranscriptProvider(TranscriptProvider):
+    """Tries YouTube Data API first, then yt-dlp, then youtube-transcript-api."""
+
+    def __init__(self) -> None:
+        self._providers: list[TranscriptProvider] = []
+        has_api_creds = all([
+            config.youtube_client_id,
+            config.youtube_client_secret,
+            config.youtube_refresh_token,
+        ])
+        if has_api_creds:
+            self._providers.append(YouTubeDataApiTranscriptProvider())
+        self._providers.append(YtDlpTranscriptProvider())
+        self._providers.append(YouTubeTranscriptProvider())
+
+    def fetch(
+        self,
+        video_id: str,
+        languages: Optional[List[str]] = None,
+    ) -> Transcript:
+        last_exc = None
+        for i, provider in enumerate(self._providers):
+            try:
+                return provider.fetch(video_id, languages=languages)
+            except Exception as exc:
+                last_exc = exc
+                if i < len(self._providers) - 1:
+                    log.warning(
+                        "%s failed for %s: %s — trying next provider",
+                        type(provider).__name__, video_id, exc,
+                    )
+        raise RuntimeError(
+            f"All transcript providers failed for {video_id}: {last_exc}"
+        )
+
+    def list_transcripts(self, video_id: str) -> List[TranscriptInfo]:
+        for provider in self._providers:
+            try:
+                return provider.list_transcripts(video_id)
+            except Exception:
+                continue
+        return []
 
 
 # ── Convenience factory ───────────────────────────────────────────────
 
 def create_transcript_provider() -> TranscriptProvider:
     """
-    Return a ``FailoverTranscriptProvider`` that tries yt-dlp first,
-    then falls back to ``youtube-transcript-api``.
+    Return a ``FailoverTranscriptProvider`` that tries:
+    - YouTube Data API v3 (if OAuth credentials configured)
+    - yt-dlp
+    - youtube-transcript-api (with proxy support)
     """
     return FailoverTranscriptProvider()

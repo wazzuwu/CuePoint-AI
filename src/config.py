@@ -64,6 +64,11 @@ class Config:
     # ── Retrieval ─────────────────────────────────────────────────────
     retrieval_top_k: int = int(os.getenv("RETRIEVAL_TOP_K", "7"))
 
+    # ── YouTube Data API (OAuth) ──────────────────────────────────────
+    youtube_client_id: str | None = os.getenv("YOUTUBE_CLIENT_ID")
+    youtube_client_secret: str | None = os.getenv("YOUTUBE_CLIENT_SECRET")
+    youtube_refresh_token: str | None = os.getenv("YOUTUBE_REFRESH_TOKEN")
+
     # ── Groq ───────────────────────────────────────────────────────────
     groq_api_key: str = os.getenv("GROQ_API_KEY", "")
     groq_base_url: str = os.getenv(
