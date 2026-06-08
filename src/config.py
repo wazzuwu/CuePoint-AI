@@ -47,11 +47,6 @@ class Config:
         ]
     )
 
-    # ── Embedding model ─────────────────────────────────────────────────
-    embedding_model_name: str = os.getenv(
-        "EMBEDDING_MODEL", "all-MiniLM-L6-v2"
-    )
-
     # ── Chunking ──────────────────────────────────────────────────────
     chunk_target_tokens: int = int(os.getenv("CHUNK_TARGET_TOKENS", "200"))
     chunk_overlap_tokens: int = int(os.getenv("CHUNK_OVERLAP_TOKENS", "40"))

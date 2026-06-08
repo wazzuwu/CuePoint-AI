@@ -2,8 +2,11 @@
 Transcript service layer.
 
 Provides an abstract base class (``TranscriptProvider``) and concrete
-implementations that fetch YouTube subtitles via yt-dlp (primary) or
-``youtube-transcript-api`` (fallback).
+implementations that fetch YouTube subtitles via:
+
+1. YouTube Data API v3 (OAuth) — if credentials configured
+2. yt-dlp — resilient extraction
+3. youtube-transcript-api — final fallback with proxy support
 
 Why abstract?
 -------------
