@@ -387,7 +387,7 @@ class YouTubeDataApiTranscriptProvider(TranscriptProvider):
         # Download caption content (SRT format)
         resp = requests.get(
             f"{self._API_BASE}/captions/{caption_id}",
-            params={"tfmt": "srt"},
+            params={"tfmt": "srt", "alt": "media"},
             headers=headers,
         )
         resp.raise_for_status()
