@@ -15,7 +15,6 @@ from langchain_groq import ChatGroq
 
 from src.config import config
 from src.services.embedding_service import get_embedding_provider
-from src.services.reranker import Reranker
 from src.services.vector_store import VectorStore
 
 SYSTEM_PROMPT = """You're discussing a podcast you just listened to with a friend who also heard it.
@@ -42,7 +41,6 @@ class QAPipeline:
         self._video_id = video_id
         ep = get_embedding_provider()
         self._store = VectorStore(collection_name=f"podcast_{video_id}")
-        self._reranker = Reranker()
         self._llm = ChatGroq(
             model=config.llm_model,
             temperature=config.llm_temperature,
@@ -69,11 +67,7 @@ class QAPipeline:
           answer   : str
           sources  : list[dict]
         """
-        candidates = self._store.search(question, k=config.retrieval_candidates)
-
-        top_chunks = self._reranker.rerank(
-            question, candidates, top_k=config.retrieval_top_k
-        )
+        top_chunks = self._store.search(question, k=config.retrieval_top_k)
 
         context = _format_context(top_chunks)
 
@@ -93,10 +87,7 @@ class QAPipeline:
 
     def ask_stream(self, question: str, history: Optional[List[BaseMessage]] = None):
         """Stream answer tokens, yielding them one by one."""
-        candidates = self._store.search(question, k=config.retrieval_candidates)
-        top_chunks = self._reranker.rerank(
-            question, candidates, top_k=config.retrieval_top_k
-        )
+        top_chunks = self._store.search(question, k=config.retrieval_top_k)
         context = _format_context(top_chunks)
 
         messages = [SystemMessage(content=SYSTEM_PROMPT)]

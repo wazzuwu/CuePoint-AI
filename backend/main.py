@@ -75,10 +75,8 @@ async def load_video(req: LoadRequest) -> LoadResponse:
 
     chunks = chunk_transcript(transcript)
 
-    from src.services.embedding_service import get_embedding_provider
     from src.services.vector_store import VectorStore
 
-    ep = get_embedding_provider()
     store = VectorStore(collection_name=f"podcast_{video_id}")
     store.add_chunks(chunks)
 

@@ -61,11 +61,7 @@ class Config:
     )
 
     # ── Retrieval ─────────────────────────────────────────────────────
-    retrieval_candidates: int = int(os.getenv("RETRIEVAL_CANDIDATES", "20"))
-    retrieval_top_k: int = int(os.getenv("RETRIEVAL_TOP_K", "5"))
-    reranker_model: str = os.getenv(
-        "RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2"
-    )
+    retrieval_top_k: int = int(os.getenv("RETRIEVAL_TOP_K", "7"))
 
     # ── Groq ───────────────────────────────────────────────────────────
     groq_api_key: str = os.getenv("GROQ_API_KEY", "")

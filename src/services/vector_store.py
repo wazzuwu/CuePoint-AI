@@ -12,9 +12,10 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 import chromadb
-from chromadb.utils import embedding_functions
+import numpy as np
 
 from src.config import config
+from src.services.embedding_service import get_embedding_provider
 
 
 class VectorStore:
@@ -28,17 +29,12 @@ class VectorStore:
     """
 
     def __init__(self, collection_name: str = "podcast_transcripts") -> None:
-        self._ef = embedding_functions.SentenceTransformerEmbeddingFunction(
-            model_name=config.embedding_model_name,
-        )
-
         self._client = chromadb.PersistentClient(
             path=config.chroma_persist_dir,
         )
 
         self._collection = self._client.get_or_create_collection(
             name=collection_name,
-            embedding_function=self._ef,
         )
 
     def add_chunks(self, chunks: List[dict]) -> None:
@@ -57,8 +53,12 @@ class VectorStore:
         if not to_add:
             return
 
+        ep = get_embedding_provider()
+        embeddings = ep.embed([c["text"] for c in to_add])
+
         self._collection.add(
             ids=[c["chunk_id"] for c in to_add],
+            embeddings=embeddings.tolist(),
             documents=[c["text"] for c in to_add],
             metadatas=[
                 {"start": c["start"], "end": c["end"], "tokens": c["tokens"]}
@@ -72,8 +72,11 @@ class VectorStore:
         k: int = 20,
     ) -> List[Dict[str, Any]]:
         """Return top-*k* chunks similar to *query*."""
+        ep = get_embedding_provider()
+        query_emb = ep.embed([query])[0]
+
         results = self._collection.query(
-            query_texts=[query],
+            query_embeddings=query_emb.reshape(1, -1).tolist(),
             n_results=k,
         )
 
