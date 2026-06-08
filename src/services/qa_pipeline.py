@@ -14,7 +14,6 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 
 from src.config import config
-from src.services.embedding_service import get_embedding_provider
 from src.services.vector_store import VectorStore
 
 SYSTEM_PROMPT = """You're discussing a podcast you just listened to with a friend who also heard it.
@@ -39,7 +38,6 @@ class QAPipeline:
 
     def __init__(self, video_id: str) -> None:
         self._video_id = video_id
-        ep = get_embedding_provider()
         self._store = VectorStore(collection_name=f"podcast_{video_id}")
         self._llm = ChatGroq(
             model=config.llm_model,

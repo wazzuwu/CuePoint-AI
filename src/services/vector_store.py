@@ -12,10 +12,9 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 import chromadb
-import numpy as np
+from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 
 from src.config import config
-from src.services.embedding_service import get_embedding_provider
 
 
 class VectorStore:
@@ -37,6 +36,8 @@ class VectorStore:
             name=collection_name,
         )
 
+        self._ef = DefaultEmbeddingFunction()
+
     def add_chunks(self, chunks: List[dict]) -> None:
         """Index chunks. Skips IDs that already exist (idempotent)."""
         ids = [c["chunk_id"] for c in chunks]
@@ -53,12 +54,11 @@ class VectorStore:
         if not to_add:
             return
 
-        ep = get_embedding_provider()
-        embeddings = ep.embed([c["text"] for c in to_add])
+        embeddings = self._ef([c["text"] for c in to_add])
 
         self._collection.add(
             ids=[c["chunk_id"] for c in to_add],
-            embeddings=embeddings.tolist(),
+            embeddings=embeddings,
             documents=[c["text"] for c in to_add],
             metadatas=[
                 {"start": c["start"], "end": c["end"], "tokens": c["tokens"]}
@@ -72,11 +72,10 @@ class VectorStore:
         k: int = 20,
     ) -> List[Dict[str, Any]]:
         """Return top-*k* chunks similar to *query*."""
-        ep = get_embedding_provider()
-        query_emb = ep.embed([query])[0]
+        query_emb = self._ef([query])
 
         results = self._collection.query(
-            query_embeddings=query_emb.reshape(1, -1).tolist(),
+            query_embeddings=query_emb,
             n_results=k,
         )
 
