@@ -328,7 +328,7 @@ class YouTubeDataApiTranscriptProvider(TranscriptProvider):
     """
 
     _TOKEN_URL = "https://oauth2.googleapis.com/token"
-    _API_BASE = "https://youtube.googleapis.com/v1"
+    _API_BASE = "https://youtube.googleapis.com/youtube/v3"
     _SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl"]
 
     def __init__(self) -> None:
