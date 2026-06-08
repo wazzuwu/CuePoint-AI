@@ -4,9 +4,9 @@ Transcript service layer.
 Provides an abstract base class (``TranscriptProvider``) and concrete
 implementations that fetch YouTube subtitles via:
 
-1. YouTube Data API v3 (OAuth) — if credentials configured
-2. yt-dlp — resilient extraction
-3. youtube-transcript-api — final fallback with proxy support
+1. Local cache (JSON files in ``data/cache/``)
+2. YouTube Data API v3 (OAuth) — if credentials configured
+3. youtube-transcript-api — fallback with proxy support
 
 Why abstract?
 -------------
@@ -17,25 +17,67 @@ Why abstract?
 
 from __future__ import annotations
 
+import json
 import logging
-import os
 import re
-import tempfile
-
-import requests
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import List, Optional
 
-# Third-party
-import yt_dlp
+import requests
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api.proxies import GenericProxyConfig, WebshareProxyConfig
 
-# Local
 from src.config import config
 from src.models.transcript import Transcript, TranscriptInfo, TranscriptSnippet
 
 log = logging.getLogger("transcript_service")
+
+CACHE_DIR = Path("data/cache")
+
+
+# ── Cache helpers ─────────────────────────────────────────────────────
+
+def _cache_path(video_id: str) -> Path:
+    return CACHE_DIR / f"{video_id}.json"
+
+
+def _load_cached(video_id: str) -> Transcript | None:
+    path = _cache_path(video_id)
+    if not path.exists():
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        snippets = [
+            TranscriptSnippet(text=s["text"], start=s["start"], duration=s["duration"])
+            for s in data["snippets"]
+        ]
+        return Transcript(
+            video_id=data["video_id"],
+            language=data.get("language", "English"),
+            language_code=data.get("language_code", "en"),
+            snippets=snippets,
+        )
+    except Exception as exc:
+        log.warning("Failed to load cached transcript for %s: %s", video_id, exc)
+        return None
+
+
+def _save_cache(transcript: Transcript) -> None:
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    path = _cache_path(transcript.video_id)
+    data = {
+        "video_id": transcript.video_id,
+        "language": transcript.language,
+        "language_code": transcript.language_code,
+        "snippets": [
+            {"text": s.text, "start": s.start, "duration": s.duration}
+            for s in transcript.snippets
+        ],
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
 
 
 # ── Abstract interface ────────────────────────────────────────────────
@@ -56,19 +98,7 @@ class TranscriptProvider(ABC):
         ...
 
 
-# ── yt-dlp implementation (primary) ──────────────────────────────────
-
-VTT_TIME_RE = re.compile(r"(\d{2}):(\d{2}):(\d{2})\.(\d{3})")
-
-
-def _vtt_seconds(ts: str) -> float:
-    """Convert a VTT timestamp (HH:MM:SS.mmm) to float seconds."""
-    m = VTT_TIME_RE.match(ts)
-    if not m:
-        return 0.0
-    h, mi, s, ms = int(m[1]), int(m[2]), int(m[3]), int(m[4])
-    return h * 3600 + mi * 60 + s + ms / 1000
-
+# ── SRT parser (for YouTube Data API) ─────────────────────────────────
 
 def _srt_seconds(ts: str) -> float:
     """Convert an SRT timestamp (HH:MM:SS,mmm) to float seconds."""
@@ -111,152 +141,13 @@ def _parse_srt(text: str) -> list[dict]:
     return snippets
 
 
-def _parse_vtt(text: str) -> list[dict]:
-    """Parse VTT caption text into list of {start, end, text} dicts."""
-    snippets = []
-    lines = text.strip().splitlines()
-
-    i = 0
-    while i < len(lines):
-        # Skip header lines and blank lines
-        if " --> " not in lines[i]:
-            i += 1
-            continue
-
-        # Parse timestamp line: 00:00:00.000 --> 00:00:04.000
-        ts_part = lines[i]
-        i += 1
-        start_str, end_str = ts_part.split(" --> ", 1)
-        start = _vtt_seconds(start_str)
-        end = _vtt_seconds(end_str)
-
-        # Collect text lines until blank line or next cue
-        text_parts = []
-        while i < len(lines) and lines[i].strip() and " --> " not in lines[i]:
-            text_parts.append(lines[i].strip())
-            i += 1
-
-        text = " ".join(text_parts)
-        if text:
-            snippets.append({
-                "start": start,
-                "end": end,
-                "text": text,
-            })
-
-    return snippets
-
-
-class YtDlpTranscriptProvider(TranscriptProvider):
-    """
-    Fetches transcripts by extracting YouTube subtitles via yt-dlp.
-
-    yt-dlp is more resilient to IP blocks (better headers, retries,
-    workarounds) than ``youtube-transcript-api``.
-    """
-
-    def __init__(self) -> None:
-        proxy_url = config.proxy_url or ""
-        self._ydl_opts = {
-            "quiet": True,
-            "no_warnings": True,
-            "skip_download": True,
-            "writesubtitles": True,
-            "writeautomaticsub": True,
-            "subtitlesformat": "vtt",
-            "extractor_retries": 3,
-        }
-        if proxy_url:
-            self._ydl_opts["proxy"] = proxy_url
-
-    def fetch(
-        self,
-        video_id: str,
-        languages: Optional[List[str]] = None,
-    ) -> Transcript:
-        if languages is None:
-            languages = config.transcript_languages
-
-        url = f"https://www.youtube.com/watch?v={video_id}"
-        opts = dict(self._ydl_opts)
-        opts["subtitleslangs"] = languages
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            opts["outtmpl"] = os.path.join(tmpdir, "%(id)s.%(ext)s")
-
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-
-                # Try downloading subtitles
-                ydl.download([url])
-
-            # Find the downloaded VTT file
-            vtt_path = None
-            for f in os.listdir(tmpdir):
-                if f.endswith(".vtt"):
-                    vtt_path = os.path.join(tmpdir, f)
-                    break
-
-            if not vtt_path:
-                raise RuntimeError(
-                    f"No subtitle file downloaded for {video_id} "
-                    f"(yt-dlp could not extract captions)"
-                )
-
-            with open(vtt_path, encoding="utf-8") as f:
-                raw = f.read()
-
-        snippets_raw = _parse_vtt(raw)
-
-        # Determine language from info dict
-        lang_name = info.get("language", "English")
-        lang_code = info.get("language_code", languages[0] if languages else "en")
-
-        # Build transcript model (convert start/end to start/duration)
-        snippets = [
-            TranscriptSnippet(
-                text=s["text"],
-                start=s["start"],
-                duration=s["end"] - s["start"],
-            )
-            for s in snippets_raw
-        ]
-
-        return Transcript(
-            video_id=video_id,
-            language=lang_name,
-            language_code=lang_code,
-            snippets=snippets,
-        )
-
-    def list_transcripts(self, video_id: str) -> List[TranscriptInfo]:
-        url = f"https://www.youtube.com/watch?v={video_id}"
-        with yt_dlp.YoutubeDL(dict(self._ydl_opts)) as ydl:
-            info = ydl.extract_info(url, download=False)
-
-        infos: List[TranscriptInfo] = []
-        subs = info.get("subtitles") or info.get("automatic_captions") or {}
-        for lang_code, lang_data in subs.items():
-            infos.append(
-                TranscriptInfo(
-                    video_id=video_id,
-                    language=lang_code,
-                    language_code=lang_code,
-                    is_generated=lang_code in (info.get("automatic_captions") or {}),
-                    is_translatable=False,
-                )
-            )
-        return infos
-
-
 # ── Fallback: youtube-transcript-api ──────────────────────────────────
 
 class YouTubeTranscriptProvider(TranscriptProvider):
     """
     Fetches transcript data from YouTube using ``youtube-transcript-api``.
 
-    This is the fallback provider used when yt-dlp fails. It supports
-    proxy configuration (see ``config`` for proxy settings).
+    This provider supports proxy configuration (see ``config`` for proxy settings).
     """
 
     def __init__(self) -> None:
@@ -442,10 +333,15 @@ class YouTubeDataApiTranscriptProvider(TranscriptProvider):
         return infos
 
 
-# ── Composite: primary + fallbacks ──────────────────────────────────────
+# ── Composite: cache + primary + fallbacks ─────────────────────────────
 
 class FailoverTranscriptProvider(TranscriptProvider):
-    """Tries YouTube Data API first, then yt-dlp, then youtube-transcript-api."""
+    """
+    Tries cache first, then YouTube Data API, then youtube-transcript-api.
+
+    Successful fetches from live providers are written to cache so
+    subsequent calls are instant and resilient to network issues.
+    """
 
     def __init__(self) -> None:
         self._providers: list[TranscriptProvider] = []
@@ -456,7 +352,6 @@ class FailoverTranscriptProvider(TranscriptProvider):
         ])
         if has_api_creds:
             self._providers.append(YouTubeDataApiTranscriptProvider())
-        self._providers.append(YtDlpTranscriptProvider())
         self._providers.append(YouTubeTranscriptProvider())
 
     def fetch(
@@ -464,10 +359,20 @@ class FailoverTranscriptProvider(TranscriptProvider):
         video_id: str,
         languages: Optional[List[str]] = None,
     ) -> Transcript:
+        # 1. Try cache first
+        cached = _load_cached(video_id)
+        if cached is not None:
+            log.info("Loaded cached transcript for %s", video_id)
+            return cached
+
+        # 2. Try live providers
         last_exc = None
         for i, provider in enumerate(self._providers):
             try:
-                return provider.fetch(video_id, languages=languages)
+                transcript = provider.fetch(video_id, languages=languages)
+                _save_cache(transcript)
+                log.info("Cached transcript for %s", video_id)
+                return transcript
             except Exception as exc:
                 last_exc = exc
                 if i < len(self._providers) - 1:
@@ -493,8 +398,8 @@ class FailoverTranscriptProvider(TranscriptProvider):
 def create_transcript_provider() -> TranscriptProvider:
     """
     Return a ``FailoverTranscriptProvider`` that tries:
+    - Local cache (``data/cache/<video_id>.json``)
     - YouTube Data API v3 (if OAuth credentials configured)
-    - yt-dlp
     - youtube-transcript-api (with proxy support)
     """
     return FailoverTranscriptProvider()
