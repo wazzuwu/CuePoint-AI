@@ -393,6 +393,11 @@ class YouTubeDataApiTranscriptProvider(TranscriptProvider):
             params={"tfmt": "srt", "alt": "media"},
             headers=headers,
         )
+        if not resp.ok:
+            log.error(
+                "captions.download failed: %s %s — body: %s",
+                resp.status_code, resp.reason, resp.text[:500],
+            )
         resp.raise_for_status()
 
         snippets_raw = _parse_srt(resp.text)
