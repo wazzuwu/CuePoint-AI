@@ -1,6 +1,12 @@
 # CuePoint AI
 
-Ask questions about YouTube podcasts and jump to the exact timestamp where the answer is discussed.
+Ask questions about YouTube podcasts and jump to the exact timestamp where the answer is discussed. Designed for local deployment — no cloud services required beyond Groq for the LLM.
+
+> **Screenshot placeholder**
+>
+> *Replace this with a screenshot of the app showing a question and answer with timestamp links.*
+>
+> ![App screenshot]()
 
 ## Architecture
 
@@ -10,7 +16,7 @@ Ask questions about YouTube podcasts and jump to the exact timestamp where the a
 │  ─────────────────── │     │  ────────────────── │     │  ─────────────────────── │
 │  • YouTube embed     │     │  POST /api/load     │     │  • YouTube Transcript   │
 │  • Chat UI           │     │  POST /api/session  │     │  • Token-aware chunking │
-│  • Timestamp jump    │     │  POST /api/ask      │     │  • Sentence Embeddings   │
+│  • Timestamp jump    │     │  POST /api/ask      │     │  • ChromaDB + ONNX       │
 │  • SSE streaming     │     │  POST /api/ask/     │     │  • Similarity Search     │
 │  • Dark academic     │     │       stream        │     │  • Groq LLM (Llama 3.1) │
 │    theme             │     │  POST /api/         │     └──────────────────────────┘
@@ -45,6 +51,11 @@ pip install -r requirements.txt
 
 Copy `.env.example` to `.env` and configure your Groq API key:
 
+```bash
+copy .env.example .env         # Windows
+# cp .env.example .env         # macOS / Linux
+```
+
 ```env
 GROQ_API_KEY=gsk_your_key_here
 ```
@@ -71,7 +82,13 @@ cd frontend
 npm run dev
 ```
 
-Open **[http://localhost:3000](http://localhost:3000)** in your browser.
+Open **[http://localhost:3000](http://localhost:3000)** in your browser. The default video (Lex Fridman / Elon Musk) will load automatically.
+
+> **Screenshot placeholder**
+>
+> *Replace this with a screenshot of the running app with the default video loaded and the chat interface ready.*
+>
+> ![Chat interface]()
 
 ## API Endpoints
 
@@ -99,30 +116,49 @@ curl -X POST http://localhost:8000/api/ask/stream \
   -d '{"session_id": "<session_id>", "question": "What was said about AI safety?"}'
 ```
 
-## Deployment
+## Configuration
 
-### Render (Free Tier)
-
-The project includes a `vercel.json` for the frontend and is configured to run on Render for the backend. The backend uses `sentence-transformers` with `all-MiniLM-L6-v2` for embeddings and ChromaDB for vector storage.
-
-Key environment variables for deployment:
+All settings are via environment variables in `.env`:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `GROQ_API_KEY` | — | Groq API key (required) |
-| `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | Sentence transformer model |
-| `CHROMA_PERSIST_DIR` | `data/chroma` | Vector store persistence path |
-| `RETRIEVAL_TOP_K` | `7` | Number of chunks to retrieve |
+| `TRANSCRIPT_LANGUAGES` | `en-IN,en` | YouTube caption language preference |
+| `CHUNK_TARGET_TOKENS` | `200` | Target tokens per chunk |
+| `CHUNK_OVERLAP_TOKENS` | `40` | Overlap tokens between chunks |
+| `RETRIEVAL_TOP_K` | `7` | Number of chunks to retrieve for context |
 | `LLM_MODEL` | `llama-3.1-8b-instant` | Groq LLM model ID |
+| `LLM_TEMPERATURE` | `0.3` | LLM temperature |
+| `LLM_MAX_TOKENS` | `512` | Max tokens per LLM response |
+
+## Screenshots
+
+> **Desktop view**
+>
+> *Replace this with a screenshot of the full desktop layout — video player on the left, chat on the right.*
+>
+> ![Desktop view]()
+
+> **Mobile view**
+>
+> *Replace this with a screenshot of the mobile layout — compact mini-player, inline inputs.*
+>
+> ![Mobile view]()
+
+> **Timestamp jump**
+>
+> *Replace this with a screenshot showing a clicked timestamp jumping to that point in the video.*
+>
+> ![Timestamp jump]()
 
 ## Stack
 
 | Layer | Technology |
 |-------|-----------|
 | **Backend framework** | FastAPI, Uvicorn |
-| **LLM provider** | Groq (Llama 3.1 8B) via LangChain |
+| **LLM provider** | Groq (Llama 3.1) via LangChain |
 | **Vector store** | ChromaDB (persistent) |
-| **Embeddings** | sentence-transformers (all-MiniLM-L6-v2) |
+| **Embeddings** | ChromaDB ONNX default (no PyTorch needed) |
 | **Frontend** | Next.js 16, React 19 |
 | **Video player** | react-youtube |
 | **Streaming** | Server-Sent Events (SSE) |
