@@ -39,6 +39,7 @@ class Config:
     # ── YouTube Transcript API ─────────────────────────────────────────
     youtube_proxy_username: str | None = os.getenv("YT_PROXY_USERNAME")
     youtube_proxy_password: str | None = os.getenv("YT_PROXY_PASSWORD")
+    proxy_url: str | None = os.getenv("PROXY_URL")
     transcript_languages: list[str] = field(
         default_factory=lambda: [
             x.strip()

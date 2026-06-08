@@ -19,7 +19,7 @@ from typing import List, Optional
 
 # Third-party
 from youtube_transcript_api import YouTubeTranscriptApi
-from youtube_transcript_api.proxies import WebshareProxyConfig
+from youtube_transcript_api.proxies import GenericProxyConfig, WebshareProxyConfig
 
 # Local
 from src.config import config
@@ -85,7 +85,7 @@ class YouTubeTranscriptProvider(TranscriptProvider):
         provider = YouTubeTranscriptProvider()
         transcript = provider.fetch("Rni7Fz7208c")
 
-    The provider can optionally route traffic through residential proxies
+    The provider can optionally route traffic through proxies
     to avoid IP bans (see ``config`` for proxy settings).
     """
 
@@ -94,7 +94,9 @@ class YouTubeTranscriptProvider(TranscriptProvider):
 
         # Build proxy configuration if credentials are provided in env
         proxy_config = None
-        if config.youtube_proxy_username and config.youtube_proxy_password:
+        if config.proxy_url:
+            proxy_config = GenericProxyConfig(http_url=config.proxy_url, https_url=config.proxy_url)
+        elif config.youtube_proxy_username and config.youtube_proxy_password:
             proxy_config = WebshareProxyConfig(
                 proxy_username=config.youtube_proxy_username,
                 proxy_password=config.youtube_proxy_password,
